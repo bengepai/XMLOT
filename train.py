@@ -1,6 +1,6 @@
 import numpy as np
 import ot
-
+import matplotlib.pyplot as plt
 
 def h(X,W):
     """
@@ -30,32 +30,52 @@ def mapping_learning_gradient(M, W, X, Y, reg):
     hh_x = h(X, W).T
     gradient = 0
     loss = 0
+    coupling = 0
     L = W.shape[0]
     for i in range(Y.shape[0]):
         h_x = hh_x[i]
         x = X[i]
         y = Y[i]
-        ot_distance, u, v = ot.sinkhorn(h_x, y, M, reg)
+        ot_distance, couple, u, v = ot.sinkhorn(h_x, y, M, reg)
         loss += ot_distance
+        coupling += couple
 
         #compute the gra_h, dimension L*1
         gra_h = np.log(u)/reg - np.log(np.sum(u))/(reg*L)
 
-        #compute the gra_w, dimension 1*d
+        gra = np.zeros(W.shape)
+
+        #compute the gra_w, dimension L*d
+        for j in range(len(h_x)):
+            temp_yy = h_x * -h_x[j]
+            temp_y = temp_yy.copy()
+            temp_y[j] = temp_yy[j] + h_x[j]
+            temp_y = temp_y.reshape(-1, 1)
+            temp_x = x.reshape(1, -1)
+            temp_x = temp_x * temp_y
+            temp_gra = np.sum(gra_h.reshape(-1, 1) * temp_x, axis=0)
+            gra[j] = temp_gra
+
+        gradient = gradient + gra
+
+    return loss, coupling, gradient
+
+"""
+        #compute the gra_w, dimension L*d
+        x = x.reshape(1, x.shape[0])
         temp_1 = np.dot(W, x.T)
-        temp_2 = temp_1[i]*(np.sum(temp_1)-temp_1[i])*x
+        temp_2 = temp_1*x*(np.sum(temp_1)-temp_1)
         gra_w = temp_2/(np.sum(temp_1)*np.sum(temp_1))
 
-        gradient = gradient + np.dot(gra_h,gra_w)
+        gradient = gradient + gra_h.reshape(2, 1)*gra_w
+"""
 
-    return loss, gradient
 
-
-def mapping_train(X, Y, M, learning_rate = 1e-3, num_iters = 100,batch_size = 200, verbose = False):
+def mapping_train(X, Y, M, learning_rate = 1e-4, num_iters = 300,batch_size = 100, reg = 0.05, verbose = False):
     """
-    :param X:
-    :param Y:
-    :param M:
+    :param X: train feature X=[x1,x2,x3...xm].T dimension: m*d
+    :param Y: train label  Y = [y1,y2,y3...ym].T dimension: m*L
+    :param M: cost matrix
     :param learning_rate:
     :param num_iters:
     :param batch_size:
@@ -65,23 +85,57 @@ def mapping_train(X, Y, M, learning_rate = 1e-3, num_iters = 100,batch_size = 20
 
     num_train, dim = X.shape
     L = Y.shape[1]
-    W = 0.001 * np.random.randn(dim,L)
-
+    W = 0.001 * np.random.randn(L,dim)
+    coupling = 0
     loss_history = []
     for it in range(num_iters):
         X_batch = None
         Y_batch = None
 
-        batch_idx = np.random.choice(num_train, batch_size, replace=True)
+        batch_idx = np.random.choice(num_train, batch_size, replace=False)
         X_batch = X[batch_idx]
         Y_batch = Y[batch_idx]
 
-        loss, grad = mapping_learning_gradient(M,W,X_batch,Y_batch,reg)
+        loss, couple, grad = mapping_learning_gradient(M,W,X_batch,Y_batch,reg)
         loss_history.append(loss)
-
+        coupling = couple     #get the newest couple
         W += -learning_rate * grad
 
-        if verbose and it % 100 == 0:
-            print('iteration %d: loss %f' % (it, num_iters, loss))
-    return loss_history
+#        if it % 100 == 0:
+#            print('iteration %d: loss %f' % (it, loss))
+    return loss_history, coupling
 
+def ground_train(P, Y, C):
+    """
+    :param C: hyper parameter between OT and K
+    :param P: coupling matrix dimension: L*L
+    :param Y: train label  Y = [y1,y2,y3...ym].T dimension: m*L
+    :return:
+    """
+    K_0 = np.dot(Y.T, Y)
+    K_temp = K_0 + 2*P
+    for i in range(Y.shape[1]):
+        K_temp[i][i] = K_0[i][i]-np.sum(P[i])-np.sum(P[:, i])+2*P[i][i]
+    eigvals, eigvectors = np.linalg.eig(K_temp)
+    eigvals = np.maximum(eigvals, 0)
+    K = np.dot(eigvectors*eigvals.T, eigvectors.T)
+    K_diag = np.diag(K)
+    K_diag = K_diag.reshape(-1, 1)
+    M = K_diag - 2*K + K_diag.T
+    return M/C
+
+if __name__ == '__main__':
+    # for testing
+    X = np.random.rand(100, 50)
+    Y = np.random.rand(100, 50)
+    Y_sum = np.sum(Y, axis=1).reshape(-1, 1)
+    Y = Y/Y_sum
+    C = 1
+    M = np.eye(Y.shape[1])*0.05
+    for iter in range(100):
+        loss_history, coupling = mapping_train(X, Y, M)
+        print("the iter last loss: %f", loss_history[-1])
+#        x_cor = range(len(loss_history))
+#        plt.plot(x_cor, loss_history, 'ro-')
+#        plt.show()
+        M = ground_train(coupling, Y, C)
