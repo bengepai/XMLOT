@@ -1,5 +1,6 @@
 import numpy as np
 import ot
+import tensorflow as tf
 import matplotlib.pyplot as plt
 
 def h(X,W):
@@ -124,18 +125,60 @@ def ground_train(P, Y, C):
     M = K_diag - 2*K + K_diag.T
     return M/C
 
+def compression_train(Y, M, l):
+    """
+    learn the mapping from high dimension to low dimension, Y:m*L -> Y':m*l
+    :param Y:the label matrix
+    :param M:the compressive label correlation matrix
+    :param l:hyper parameter, the low dimension
+    :return:low dimension label m*l
+    """
+    def weight_variable(shape):
+        initial = tf.truncated_normal(shape,stddev=0.1)
+        return tf.Variable(initial)
+
+    def bias_variable(shape):
+        initial = tf.constant(0.1, shape=shape)
+        return tf.Variable(initial)
+
+    L = Y.shape[1]
+    x = tf.placeholder("float", [None, L])
+
+    W_1 = weight_variable([L, 150])
+    bias_1 = bias_variable([150])
+    layer_1 = tf.nn.relu(tf.matmul(x, W_1) + bias_1)
+
+    W_2 = weight_variable([150, l])
+    bias_2 = bias_variable([l])
+    layer_2 = tf.nn.relu(tf.matmul(layer_1, W_2) + bias_2)
+
+    sess = tf.InteractiveSession()
+
+    loss = tf.norm(tf.matmul(tf.transpose(layer_2), layer_2)-M)
+    train_step = tf.train.AdamOptimizer(1e-4).minimize(loss)
+    sess.run(tf.initialize_all_variables())
+    for i in range(20000):
+        train_step.run(feed_dict={x: Y})
+        if i%100 == 0:
+            loss_value = loss.eval(feed_dict={x: Y})
+            print("step %d, loss %d", (i,loss_value))
+    layer = layer_2.eval(feed_dict={x: Y})
+    temp = np.dot(layer.T,layer)
+    print(layer)
 if __name__ == '__main__':
     # for testing
     X = np.random.rand(100, 50)
-    Y = np.random.rand(100, 50)
+    Y = np.random.rand(100, 10)
     Y_sum = np.sum(Y, axis=1).reshape(-1, 1)
     Y = Y/Y_sum
     C = 1
-    M = np.eye(Y.shape[1])*0.05
-    for iter in range(100):
+    M = np.eye(5)*0.05
+    compression_train(Y,M,5)
+"""    for iter in range(100):
         loss_history, coupling = mapping_train(X, Y, M)
         print("the iter last loss: %f", loss_history[-1])
 #        x_cor = range(len(loss_history))
 #        plt.plot(x_cor, loss_history, 'ro-')
 #        plt.show()
         M = ground_train(coupling, Y, C)
+"""
