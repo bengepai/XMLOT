@@ -28,3 +28,15 @@ learning_rate = 1.000000, error = 10.012280
 learning_rate = 100.000000, error = 10.012280
 learning_rate = 0.000000005, error = 10.883587
 learning_rate = 0.00000005, error = 10.468731
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+knn_number:
+
+knn_number = 5.000000, error = 10.777067
+knn_number = 10.000000, error = 10.691852
+knn_number = 20.000000, error = 10.499966
+knn_number = 50.000000, error = 10.392633
+knn_number = 70.000000, error = 10.429287
+knn_number = 80.000000, error = 10.416281
+

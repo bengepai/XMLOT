@@ -292,10 +292,11 @@ def read_split_file(file_name, N):
 
 if __name__ == '__main__':
 
-
     C_set = [1e-2, 1e-1, 1, 10, 1e2]
-    lam_set = [1e-2, 1e-1, 1, 10, 1e2]
+    lam_1_set = [1e-2, 1e-1, 1, 10, 1e2]
+    lam_2_set = [1e-2, 1e-1, 1, 10, 1e2]
     rate_set = [5e-9, 5e-8]
+    knn_set = [5, 10, 20, 50, 70, 80]
 
     N = 3
     C = 0.1
@@ -303,7 +304,7 @@ if __name__ == '__main__':
     lam_2 = 100   #In compression, balance the loss_label and loss_data
     l = 70
     reg = 0.05
-    knn_number = 20
+    knn_number = 50
     compress_number = 10000
     sinkhorn_number = 1
     num_training = 1000
@@ -342,12 +343,12 @@ if __name__ == '__main__':
     DC = compute_squared(train_Y.T)
 
     file = open('result.txt', 'w')
-#    for learning_rate in rate_set:
+#    for knn_number in knn_set:
     Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg)
     print("begin predict")
     pre_Y = predict(test_X, W, train_X, train_Y, Y_, knn_number)
-#        print("learning_rate = %f, error = %f" % (learning_rate, np.linalg.norm(pre_Y-test_Y)))
-#        file.write("learning_rate = %f, error = %f\n" % (learning_rate, np.linalg.norm(pre_Y-test_Y)))
+#        print("knn_number = %f, error = %f" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
+#        file.write("knn_number = %f, error = %f\n" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
 
     # save the mat file to matlab
     train_Y = sparse.csc_matrix(origin_train_Y.T)
@@ -372,30 +373,30 @@ if __name__ == '__main__':
 """
 # the current result
 precision at 1--5
-    0.7540
-    0.7080
-    0.5487
-    0.4985
-    0.4268
+    0.7480
+    0.6380
+    0.5693
+    0.4850
+    0.4300
 
 nDCG at 1--5
-    0.7540
-    0.7202
-    0.6234
-    0.6178
-    0.5935
+    0.7480
+    0.6677
+    0.6342
+    0.5995
+    0.5896
 
 propensity weighted precision at 1--5
-    0.3947
-    0.4398
-    0.3980
-    0.4136
-    0.4042
+    0.3918
+    0.4006
+    0.4096
+    0.4026
+    0.4072
 
 propensity weighted nDCG at 1--5
-    0.3947
-    0.4282
-    0.4027
-    0.4117
-    0.4065
+    0.3918
+    0.3984
+    0.4046
+    0.4008
+    0.4035
 """
