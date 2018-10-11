@@ -46,10 +46,7 @@ def mapping_learning_gradient(M, W, X, Y, reg):
 #        gra_h = np.log(u)/reg - np.log(np.sum(u))/(reg*L)
         gra_h = np.log(u)/reg - np.sum(np.log(u))/(reg*L)
 
-        gra = np.zeros(W.shape)
-
         #compute the gra_w, dimension L*d
-
         temp_yy = h_x * -h_x.reshape(-1, 1)
         temp_y = temp_yy.copy()
         temp_y = temp_y + np.diag(h_x)
@@ -94,7 +91,7 @@ def mapping_train(X, Y, M, W, learning_rate = 1e-6, num_iters = 50,batch_size = 
             print('mapping train iteration %d: loss %.30f' % (it, loss))
     return loss_history, coupling, W
 
-def ground_train(P, Y, C, lam, pre_M):
+def ground_train(P, Y, C, lam_1, pre_M):
     """
     learn the cost matrix
     :param C: hyper parameter between OT and K
@@ -104,11 +101,19 @@ def ground_train(P, Y, C, lam, pre_M):
     :return:
     """
     K_0 = np.dot(Y.T, Y)
-#    cof = lam*np.linalg.norm(pre_M - K_0)
-    cof = 1
-    K_temp = K_0 + C*(2*P + 2*cof)
-    for i in range(Y.shape[1]):
-        K_temp[i][i] = K_0[i][i] + C*(-np.sum(P[i])-np.sum(P[:, i])+2*P[i][i]+cof*(2-2*Y.shape[1]))
+    #grad_f_K = -2*P - diag(diag(-2*P)) + diag(sum(P,2) + sum(P,1)' - 2*diag(P));
+    #K = K_0 - 1/C*grad_f_K;
+
+    # the gradient of K- K_0
+    grad_f_k = -2*P - np.diag(np.diag(-2*P)) + np.diag(np.sum(P, axis=0) + np.sum(P, axis=1) - 2*np.diag(P))
+
+    # the gradient of dm(phi(Y)) - M
+    L_num = pre_M.shape[0]
+    grad_f_phi_temp = np.ones((L_num, L_num))*(-2) + 2*L*np.eye(L_num)
+    grad_f_phi = (pre_M - compute_squared(Y)) * grad_f_phi_temp
+
+    K_temp = K_0 - (1/C)*grad_f_k - (1/lam_1)*grad_f_phi
+
     eigvals, eigvectors = np.linalg.eig((K_temp+K_temp.T)/2)
     eigvals = np.maximum(eigvals, 0)
     K = np.dot(eigvectors*eigvals.T, eigvectors.T)
@@ -118,7 +123,7 @@ def ground_train(P, Y, C, lam, pre_M):
     M = M/np.max(M)
     return M
 
-def compression_train(Y, M, DC, l, compress_number = 2000):
+def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
     """
     learn the mapping from high dimension to low dimension, Y:m*L -> Y':m*l
     :param Y:the label matrix
@@ -146,19 +151,23 @@ def compression_train(Y, M, DC, l, compress_number = 2000):
     num = Y.shape[0]
     x = tf.placeholder("float", [None, L])
 
-    W_1 = weight_variable([L, L])
-    bias_1 = bias_variable([L])
+    W_1 = weight_variable([L, int((L+l)/2)])
+    bias_1 = bias_variable([int((L+l)/2)])
     layer_1 = tf.nn.relu(tf.matmul(x, W_1) + bias_1)
 
-    W_2 = weight_variable([L, l])
+    W_2 = weight_variable([int((L+l)/2), l])
     bias_2 = bias_variable([l])
     layer_2 = tf.nn.relu(tf.matmul(layer_1, W_2) + bias_2)
 
-    layer_2 = tf.add(layer_2, 1e-10)
+    layer_2 = tf.add(layer_2, 1e-15)
 
+#    layer = tf.nn.softmax(layer_2)
     layer = layer_2 / tf.reshape(tf.reduce_sum(layer_2, 1), [-1, 1])
 
-    loss = tf.norm(compute_distance_matrix(layer, l) - M) + tf.norm(compute_distance_matrix(tf.transpose(layer), num)-DC)
+    loss_label = tf.norm(compute_distance_matrix(layer, l) - M)
+    loss_data = tf.norm(compute_distance_matrix(tf.transpose(layer), num) - DC)
+
+    loss = loss_label * loss_label + lam_2 * loss_data * loss_data
 
     with tf.Session() as sess:
         train_step = tf.train.AdamOptimizer(1e-4).minimize(loss)
@@ -172,7 +181,7 @@ def compression_train(Y, M, DC, l, compress_number = 2000):
         layer_r = layer.eval(feed_dict={x: Y})
     return layer_r
 
-def alternative_train(X, N, Y, M, DC, l, C, lam, compress_number, sinkhorn_number, reg):
+def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg):
     """
     train the model h(x), phi(y), cost matrix M
     :param N: the total number of train
@@ -185,17 +194,16 @@ def alternative_train(X, N, Y, M, DC, l, C, lam, compress_number, sinkhorn_numbe
     """
     W = np.random.rand(l, X.shape[1])
     for iter in range(N):
-        Y_ = compression_train(Y, M, DC, l, compress_number)
+        Y_ = compression_train(Y, M, DC, l, lam_2, compress_number)
         if iter == 0:
             K = np.dot(Y_.T, Y_)
             K_diag = np.diag(K)
             K_diag = K_diag.reshape(-1, 1)
             M = np.abs(K_diag - 2 * K + K_diag.T)
             M = M/np.max(M)
-#        print(Y_[0] == Y_[1])
-        loss_history, coupling, W = mapping_train(X, Y_, M, W, 1e-7, sinkhorn_number, 400, reg)
+        loss_history, coupling, W = mapping_train(X, Y_, M, W, learning_rate, sinkhorn_number, batch_size, reg)
         print("the iter last loss: %f",loss_history[-1])
-        M = ground_train(coupling, Y_, C, lam, M)
+        M = ground_train(coupling, Y_, C, lam_1, M)
     return Y_, M, W
 
 #TODO using bicluster
@@ -225,6 +233,7 @@ def predict(X_test, W, X, Y, Y_, knn_number=10):
         candidate = np.sum(temp_re, axis=1)
         dis_index = np.argsort(candidate)
         pre_label = 0
+        #add weight?
         for j in range(knn_number):
             pre_label = pre_label + Y[dis_index[j]]
         pre_label /= knn_number
@@ -262,20 +271,30 @@ def compute_squared(X):
   m,n = X.shape
   G = np.dot(X.T, X)
   H = np.tile(np.diag(G), (n,1))
-  return H + H.T - 2*G
+  temp_r = H + H.T - 2*G
+  return temp_r/np.max(temp_r)
 
 if __name__ == '__main__':
+
+
+    C_set = [1e-2, 1e-1, 1, 10, 1e2]
+    lam_set = [1e-2, 1e-1, 1, 10, 1e2]
+
     N = 5
-    C = 0.05
-    lam = 1
+    C = 0.1
+    lam_1 = 100  #In ground learning, the hyper parameter of phi(y)
+    lam_2 = 100   #In compression, balance the loss_label and loss_data
     l = 70
     reg = 0.05
-    knn_number = 200
-    compress_number = 1000
+    knn_number = 20
+    compress_number = 10000
     sinkhorn_number = 1
+    num_training = 1000
+    num_testing = 500
+    batch_size = int(num_training/2)
+    learning_rate = 1e-7
 
     scale_m = 1.5
-	
 
     M = np.random.rand(l, l)
     M = M/ np.max(M)
@@ -284,42 +303,45 @@ if __name__ == '__main__':
 
     num_training = 1000
     mask = list(range(num_training))
-    num_testing = 500
-    mask_test = list(range(2000, 2500))
     train_X = feature_matrix[mask]
 
-# has term all zero
+    num_testing = 500
+    mask_test = list(range(2000, 2500))
     train_Y = label_matrix[mask]
+# train_Y has term all zero
     train_Y_sum = np.sum(train_Y, axis=1).reshape(-1, 1)
-    train_Y_sum = np.maximum(train_Y_sum, 1e-10)
+    train_Y_sum = np.maximum(train_Y_sum, 1e-20)
+    origin_train_Y = train_Y
     train_Y = train_Y / train_Y_sum
-	
-#DC represent the data correlation
-
-    DC = compute_squared(train_Y.T)
-
 
     test_X = feature_matrix[mask_test]
     test_Y = label_matrix[mask_test]
 
     test_Y_sum = np.sum(test_Y, axis=1).reshape(-1, 1)
-    test_Y_sum = np.maximum(test_Y_sum, 1e-10)
+    test_Y_sum = np.maximum(test_Y_sum, 1e-20)
+    origin_test_Y = test_Y
     test_Y = test_Y / test_Y_sum
 
-    Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam, compress_number, sinkhorn_number, reg)
+    # DC represent the data correlation
+    DC = compute_squared(train_Y.T)
+
+    file = open('result.txt', 'w')
+
+    Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg)
     print("begin predict")
     pre_Y = predict(test_X, W, train_X, train_Y, Y_, knn_number)
-
+    print("C = %f, lam = %f, error = %f" % (C, lam_1, np.linalg.norm(pre_Y-test_Y)))
+#            file.write("C = %f, lam = %f, error = %f" % (C, lam, np.linalg.norm(pre_Y-test_Y)))
     # save the mat file to matlab
-"""
-    train_Y = sparse.csc_matrix(train_Y.T)
-    test_Y = sparse.csc_matrix(test_Y.T)
+
+    train_Y = sparse.csc_matrix(origin_train_Y.T)
+    test_Y = sparse.csc_matrix(origin_test_Y.T)
     pre_Y = sparse.csc_matrix(pre_Y.T)
 
     scipy.io.savemat('train_Y.mat', {'train_Y': train_Y})
     scipy.io.savemat('pre_Y.mat', {'pre_Y': pre_Y})
     scipy.io.savemat('test_Y.mat', {'test_Y': test_Y})
-"""
+
 
 """
 if __name__ == '__main__':
@@ -389,3 +411,32 @@ if __name__ == '__main__':
 """
 
 
+"""
+precision at 1--5
+    0.6520
+    0.5380
+    0.4907
+    0.4185
+    0.3880
+
+nDCG at 1--5
+    0.6520
+    0.5638
+    0.5359
+    0.5191
+    0.5367
+
+propensity weighted precision at 1--5
+    0.3677
+    0.3684
+    0.3916
+    0.3910
+    0.4309
+
+propensity weighted nDCG at 1--5
+    0.3677
+    0.3682
+    0.3832
+    0.3836
+    0.4057
+"""
