@@ -295,6 +295,7 @@ if __name__ == '__main__':
 
     C_set = [1e-2, 1e-1, 1, 10, 1e2]
     lam_set = [1e-2, 1e-1, 1, 10, 1e2]
+    rate_set = [5e-9, 5e-8]
 
     N = 3
     C = 0.1
@@ -308,7 +309,7 @@ if __name__ == '__main__':
     num_training = 1000
     num_testing = 500
     batch_size = int(num_training/2)
-    learning_rate = 1e-7
+    learning_rate = 1e-8
 
     M = np.random.rand(l, l)
     M = M / np.max(M)
@@ -341,14 +342,14 @@ if __name__ == '__main__':
     DC = compute_squared(train_Y.T)
 
     file = open('result.txt', 'w')
-
+#    for learning_rate in rate_set:
     Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg)
     print("begin predict")
     pre_Y = predict(test_X, W, train_X, train_Y, Y_, knn_number)
-    print("C = %f, lam = %f, error = %f" % (C, lam_1, np.linalg.norm(pre_Y-test_Y)))
-#            file.write("C = %f, lam = %f, error = %f" % (C, lam, np.linalg.norm(pre_Y-test_Y)))
-    # save the mat file to matlab
+#        print("learning_rate = %f, error = %f" % (learning_rate, np.linalg.norm(pre_Y-test_Y)))
+#        file.write("learning_rate = %f, error = %f\n" % (learning_rate, np.linalg.norm(pre_Y-test_Y)))
 
+    # save the mat file to matlab
     train_Y = sparse.csc_matrix(origin_train_Y.T)
     test_Y = sparse.csc_matrix(origin_test_Y.T)
     pre_Y = sparse.csc_matrix(pre_Y.T)
@@ -358,72 +359,6 @@ if __name__ == '__main__':
     scipy.io.savemat('test_Y.mat', {'test_Y': test_Y})
 
 
-"""
-if __name__ == '__main__':
-    l_set = [10, 30, 50, 70, 90]
-    C_set = [0.01, 0.1, 0.5, 1, 5, 10]
-    lam_set = [0.01, 0.1, 0.5, 1, 5, 10]
-    scale_m_set = [0.01, 0.1, 0.5, 1, 5, 10]
-
-    feature_matrix, label_matrix, L, number, dimension = read_data()
-    error_list = []
-
-    num_training = 5000
-    mask = list(range(num_training))
-    train_X = feature_matrix[mask]
-    train_Y = label_matrix[mask]
-
-    num_folds = 5
-
-    x_train_folds = np.array_split(train_X, num_folds)
-    y_train_folds = np.array_split(train_Y, num_folds)
-
-    reg = 0.05
-    scale_m = 1.5
-    N = 2
-    l = 70
-    M = np.eye(l) * scale_m
-    knn_number = 100
-    compress_number = 5000
-    sinkhorn_number = 100
-    file1 = open('result.txt', 'w')
-    for C in C_set:
-        for lam in lam_set:
-            error = 0
-            for fold in range(num_folds):
-                print('C = %f, lam = %f, fold = %f' % (C, lam, fold))
-                temp_X = x_train_folds[:]
-                temp_y = y_train_folds[:]
-                x_validate_fold = temp_X.pop(fold)
-                y_validate_fold = temp_y.pop(fold)
-                temp_X = np.array([y for x in temp_X for y in x])
-                temp_y = np.array([y for x in temp_y for y in x])
-                Y_, M, W = alternative_train(temp_X, N, temp_y, M, l, C, lam, compress_number, sinkhorn_number, reg)
-                print('predict')
-                pre_Y = predict(x_validate_fold, W, temp_X, temp_y, Y_, knn_number)
-                error += np.linalg.norm(pre_Y - y_validate_fold)
-            error = error/num_folds
-            print('C = %f, lam = %f, error = %f' % (C, lam, error))
-            file1.write('C = %f, lam = %f, error = %f' % (C, lam, error))
-"""
-
-
-# test
-"""
-    N = 3
-    X = np.random.rand(100, 10)
-    X_test = np.random.rand(3, 10)
-    Y = np.random.rand(100, 10)
-    Y_sum = np.sum(Y, axis=1).reshape(-1, 1)
-    Y = Y/Y_sum
-    C = 1
-    lam = 1
-    l = 5
-    M = np.eye(l)
-    Y_, M, W = alternative_train(X, N, Y, M, l, C, lam)
-    pre_label = predict(X_test, W, X, Y)
-    print(pre_label)
-"""
 
 
 """
@@ -437,30 +372,30 @@ if __name__ == '__main__':
 """
 # the current result
 precision at 1--5
-    0.6780
-    0.5770
-    0.5180
-    0.4610
-    0.4404
+    0.7540
+    0.7080
+    0.5487
+    0.4985
+    0.4268
 
 nDCG at 1--5
-    0.6780
-    0.6022
-    0.5732
-    0.5633
-    0.5784
+    0.7540
+    0.7202
+    0.6234
+    0.6178
+    0.5935
 
 propensity weighted precision at 1--5
-    0.3539
-    0.3604
-    0.3754
-    0.3839
-    0.4157
+    0.3947
+    0.4398
+    0.3980
+    0.4136
+    0.4042
 
 propensity weighted nDCG at 1--5
-    0.3539
-    0.3587
-    0.3688
-    0.3746
-    0.3931
+    0.3947
+    0.4282
+    0.4027
+    0.4117
+    0.4065
 """

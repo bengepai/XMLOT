@@ -1,0 +1,30 @@
+hyper parameter:
+N : 交替训练迭代次数
+C : K-K_0 这一项的惩罚因子                    key
+lam_1: 标签关系正则项的惩罚因子               key
+lam_2: 数据关系正则项的惩罚因子               key
+l : 压缩后的标签维度大小                      
+knn_number : 预测时使用的邻近点个数
+compress_number: 标签矩阵压缩时的迭代次数
+reg: sinkhorn算法熵正则项的惩罚因子          key
+
+learning_rate:mapping learning时的学习速率   key
+
+
+C, lam_1, lam_2 联合调参
+
+其他参数分别调参
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+learning_rate:
+
+learning_rate = 0.000000001, error = 10.982387
+learning_rate = 0.00000001, error = 10.396207
+learning_rate = 0.0000001, error = 10.647149
+learning_rate = 0.000001, error = 10.830496
+learning_rate = 0.000100, error = 10.537751
+learning_rate = 0.010000, error = 11.852005
+learning_rate = 1.000000, error = 10.012280
+learning_rate = 100.000000, error = 10.012280
+learning_rate = 0.000000005, error = 10.883587
+learning_rate = 0.00000005, error = 10.468731
