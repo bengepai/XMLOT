@@ -150,6 +150,7 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
     L = Y.shape[1]
     num = Y.shape[0]
     x = tf.placeholder("float", [None, L])
+    dc = tf.placeholder("float", [num, num])
 
     W_1 = weight_variable([L, int((L+l)/2)])
     bias_1 = bias_variable([int((L+l)/2)])
@@ -165,7 +166,7 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
     layer = layer_2 / tf.reshape(tf.reduce_sum(layer_2, 1), [-1, 1])
 
     loss_label = tf.norm(compute_distance_matrix(layer, l) - M)
-    loss_data = tf.norm(compute_distance_matrix(tf.transpose(layer), num) - DC)
+    loss_data = tf.norm(compute_distance_matrix(tf.transpose(layer), num) - dc)
 
     loss = loss_label * loss_label + lam_2 * loss_data * loss_data
 
@@ -174,11 +175,11 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
         sess.run(tf.initialize_all_variables())
 
         for i in range(compress_number):
-            train_step.run(feed_dict={x: Y})
+            train_step.run(feed_dict={x: Y, dc: DC})
             if i % 500 == 0:
-                loss_value = loss.eval(feed_dict={x: Y})
+                loss_value = loss.eval(feed_dict={x: Y, dc: DC})
                 print("step %d, loss %.10f" % (i, loss_value))
-        layer_r = layer.eval(feed_dict={x: Y})
+        layer_r = layer.eval(feed_dict={x: Y, dc: DC})
     return layer_r
 
 def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg):
@@ -194,6 +195,7 @@ def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkh
     """
     W = np.random.rand(l, X.shape[1])
     for iter in range(N):
+        print("the %d th iteration" % (iter))
         Y_ = compression_train(Y, M, DC, l, lam_2, compress_number)
         if iter == 0:
             K = np.dot(Y_.T, Y_)
@@ -274,13 +276,27 @@ def compute_squared(X):
   temp_r = H + H.T - 2*G
   return temp_r/np.max(temp_r)
 
+def read_split_file(file_name, N):
+    file_data = open(file_name, 'r')
+    contents = file_data.readlines()
+    result = []
+    for ii in range(len(contents)):
+        content = contents[ii]
+        temp_cont = content.split()
+        temp_con = [int(p)-1 for p in temp_cont]
+        result.append(temp_con)
+    temp_result = np.array(result)
+    temp_r = temp_result[:, N]
+    file_data.close()
+    return temp_r.tolist()
+
 if __name__ == '__main__':
 
 
     C_set = [1e-2, 1e-1, 1, 10, 1e2]
     lam_set = [1e-2, 1e-1, 1, 10, 1e2]
 
-    N = 5
+    N = 3
     C = 0.1
     lam_1 = 100  #In ground learning, the hyper parameter of phi(y)
     lam_2 = 100   #In compression, balance the loss_label and loss_data
@@ -294,19 +310,18 @@ if __name__ == '__main__':
     batch_size = int(num_training/2)
     learning_rate = 1e-7
 
-    scale_m = 1.5
-
     M = np.random.rand(l, l)
-    M = M/ np.max(M)
+    M = M / np.max(M)
 
     feature_matrix, label_matrix, L, number, dimension = read_data()
 
-    num_training = 1000
-    mask = list(range(num_training))
+    mask = read_split_file("mediamill_trSplit.txt", 0)
+    mask = mask[0:num_training]
     train_X = feature_matrix[mask]
 
-    num_testing = 500
-    mask_test = list(range(2000, 2500))
+#    num_testing = 500
+    mask_test = read_split_file("mediamill_tstSplit.txt", 0)
+    mask_test = mask[0:num_testing]
     train_Y = label_matrix[mask]
 # train_Y has term all zero
     train_Y_sum = np.sum(train_Y, axis=1).reshape(-1, 1)
@@ -412,31 +427,40 @@ if __name__ == '__main__':
 
 
 """
+>> load('pre_Y.mat')
+>> load('train_Y.mat')
+>> load('test_Y.mat')
+>> weights = inv_propensity(train_Y,0.55,1.5);
+>> [metrics]=get_all_metrics(pre_Y, test_Y,[weights]);
+
+"""
+"""
+# the current result
 precision at 1--5
-    0.6520
-    0.5380
-    0.4907
-    0.4185
-    0.3880
+    0.6780
+    0.5770
+    0.5180
+    0.4610
+    0.4404
 
 nDCG at 1--5
-    0.6520
-    0.5638
-    0.5359
-    0.5191
-    0.5367
+    0.6780
+    0.6022
+    0.5732
+    0.5633
+    0.5784
 
 propensity weighted precision at 1--5
-    0.3677
-    0.3684
-    0.3916
-    0.3910
-    0.4309
+    0.3539
+    0.3604
+    0.3754
+    0.3839
+    0.4157
 
 propensity weighted nDCG at 1--5
-    0.3677
-    0.3682
-    0.3832
-    0.3836
-    0.4057
+    0.3539
+    0.3587
+    0.3688
+    0.3746
+    0.3931
 """
