@@ -37,7 +37,6 @@ def mapping_learning_gradient(M, W, X, Y, reg):
         h_x = hh_x[i]
         x = X[i]
         y = Y[i]
-
         ot_distance, couple, u, v = ot.sinkhorn(h_x, y, M, reg)
         loss += ot_distance
         coupling += couple
@@ -125,7 +124,8 @@ def ground_train(P, Y, C, lam_1, pre_M):
     M = M/np.max(M)
     return M
 
-def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
+# the network structure is so bad
+def compression_train(Y, M, DC, l, lam_2, compress_number = 2000, seed = 1):
     """
     learn the mapping from high dimension to low dimension, Y:m*L -> Y':m*l
     :param Y:the label matrix
@@ -141,9 +141,11 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
 #        return H + tf.transpose(H) - 2 * G
         return tf.tile(tf.reshape(tf.diag_part(tf.matmul(tf.transpose(X), X)), [1, -1]), [n, 1]) + tf.transpose(tf.tile(tf.reshape(tf.diag_part(tf.matmul(tf.transpose(X), X)), [1, -1]), [n, 1])) - 2 * tf.matmul(tf.transpose(X), X)
 
-    def weight_variable(shape):
-        initial = tf.truncated_normal(shape,stddev=0.1)
-        return tf.Variable(initial)
+    def weight_variable(shape, lambda1):
+        initial = tf.truncated_normal(shape, stddev=0.1, seed=seed)
+        var = tf.Variable(initial)
+        tf.add_to_collection('losses', tf.contrib.layers.l2_regularizer(lambda1)(var))
+        return var
 
     def bias_variable(shape):
         initial = tf.constant(0.1, shape=shape)
@@ -154,13 +156,13 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
     x = tf.placeholder("float", [None, L])
     dc = tf.placeholder("float", [num, num])
 
-    W_1 = weight_variable([L, int((L+l)/2)])
+    W_1 = weight_variable([L, int((L+l)/2)], 0.003)
     bias_1 = bias_variable([int((L+l)/2)])
     layer_1 = tf.nn.relu(tf.matmul(x, W_1) + bias_1)
 
-    W_2 = weight_variable([int((L+l)/2), l])
+    W_2 = weight_variable([int((L+l)/2), l], 0.003)
     bias_2 = bias_variable([l])
-    layer_2 = tf.nn.relu(tf.matmul(layer_1, W_2) + bias_2)
+    layer_2 = tf.matmul(layer_1, W_2) + bias_2
 
 #    layer_2 = tf.add(layer_2, 1e-15)
 
@@ -171,20 +173,23 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
     loss_data = tf.norm(compute_distance_matrix(tf.transpose(layer), num) - dc)
 
     loss = loss_label * loss_label + lam_2 * loss_data * loss_data
+    tf.add_to_collection("losses", loss)
+#    losses = tf.add_n(tf.get_collection('losses'))
+
+    train_step = tf.train.AdamOptimizer(1e-3).minimize(loss)
 
     with tf.Session() as sess:
-        train_step = tf.train.AdamOptimizer(1e-2).minimize(loss)
-        sess.run(tf.initialize_all_variables())
+        tf.global_variables_initializer().run()
 
         for i in range(compress_number):
-            train_step.run(feed_dict={x: Y, dc: DC})
+            sess.run(train_step, feed_dict={x: Y, dc: DC})
             if i % 500 == 0:
-                loss_value = loss.eval(feed_dict={x: Y, dc: DC})
+                loss_value = sess.run(loss, feed_dict={x: Y, dc: DC})
                 print("step %d, loss %.10f" % (i, loss_value))
-        layer_r = layer.eval(feed_dict={x: Y, dc: DC})
+        layer_r = sess.run(layer, feed_dict={x: Y, dc: DC})
     return layer_r
 
-def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg):
+def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg,seed):
     """
     train the model h(x), phi(y), cost matrix M
     :param N: the total number of train
@@ -198,7 +203,7 @@ def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkh
     W = np.ones((l, X.shape[1]))*0.5
     for iter in range(N):
         print("the %d th iteration" % (iter))
-        Y_ = compression_train(Y, M, DC, l, lam_2, compress_number)
+        Y_ = compression_train(Y, M, DC, l, lam_2, compress_number,seed)
         if iter == 0:
             K = np.dot(Y_.T, Y_)
             K_diag = np.diag(K)
@@ -279,7 +284,7 @@ scale_m : the scale of cost matrix
 def compute_squared(X):
   m,n = X.shape
   G = np.dot(X.T, X)
-  H = np.tile(np.diag(G), (n,1))
+  H = np.tile(np.diag(G), (n, 1))
   temp_r = H + H.T - 2*G
   return temp_r/np.max(temp_r)
 
@@ -306,6 +311,8 @@ if __name__ == '__main__':
     knn_set = [5, 10, 20, 50, 70, 80]
     N_set = [3, 5, 10, 20, 50, 100]
     l_set = [5, 10, 20, 30, 50, 70, 90]
+    seed_set = [11, 12, 13, 14, 15]
+    seed = 1
     N = 3
     C = 0.1
     lam_1 = 100  #In ground learning, the hyper parameter of phi(y)
@@ -352,27 +359,26 @@ if __name__ == '__main__':
 
     seq = 0
     file = open('result.txt', 'w')
-    M = np.ones((l, l)) - np.eye(l)
-    M = M / np.max(M)
-    Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg)
-    print("begin predict")
-    pre_Y = predict(test_X, W, train_X, origin_train_Y, knn_number)
-    print("knn_number = %f, error = %f" % (l, np.linalg.norm(pre_Y-test_Y)))
-    file.write("knn_number = %f, error = %f\n" % (l, np.linalg.norm(pre_Y-test_Y)))
+    for knn_number in knn_set:
+        Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg, seed)
+        print("begin predict")
+        pre_Y = predict(test_X, W, train_X, origin_train_Y, knn_number)
+        print("knn_number = %f, error = %f" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
+        file.write("knn_number = %f, error = %f\n" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
 
-    # save the mat file to matlab
-    train_Y_temp = sparse.csc_matrix(origin_train_Y.T)
-    test_Y_temp = sparse.csc_matrix(origin_test_Y.T)
-    pre_Y_temp = sparse.csc_matrix(pre_Y.T)
+        # save the mat file to matlab
+        train_Y_temp = sparse.csc_matrix(origin_train_Y.T)
+        test_Y_temp = sparse.csc_matrix(origin_test_Y.T)
+        pre_Y_temp = sparse.csc_matrix(pre_Y.T)
 
-    train_name = 'train_Y'+str(seq)+'.mat'
-    pre_name = 'pre_Y'+str(seq)+'.mat'
-    test_name = 'test_Y'+str(seq)+'.mat'
+        train_name = 'train_Y'+str(seq)+'.mat'
+        pre_name = 'pre_Y'+str(seq)+'.mat'
+        test_name = 'test_Y'+str(seq)+'.mat'
 
-    scipy.io.savemat(train_name, {'train_Y': train_Y_temp})
-    scipy.io.savemat(pre_name, {'pre_Y': pre_Y_temp})
-    scipy.io.savemat(test_name, {'test_Y': test_Y_temp})
-    seq += 1
+        scipy.io.savemat(train_name, {'train_Y': train_Y_temp})
+        scipy.io.savemat(pre_name, {'pre_Y': pre_Y_temp})
+        scipy.io.savemat(test_name, {'test_Y': test_Y_temp})
+        seq += 1
 
 
 

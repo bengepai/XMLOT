@@ -1,1 +1,6 @@
-knn_number = 50.000000, error = 23.831130
+knn_number = 5.000000, error = 27.669094
+knn_number = 10.000000, error = 25.277336
+knn_number = 20.000000, error = 24.213081
+knn_number = 50.000000, error = 23.769288
+knn_number = 70.000000, error = 23.667932
+knn_number = 80.000000, error = 23.644683
