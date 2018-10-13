@@ -78,9 +78,11 @@ def mapping_train(X, Y, M, W, learning_rate = 1e-6, num_iters = 50,batch_size = 
         X_batch = None
         Y_batch = None
 
-        batch_idx = np.random.choice(num_train, batch_size, replace=False)
-        X_batch = X[batch_idx]
-        Y_batch = Y[batch_idx]
+#        batch_idx = np.random.choice(num_train, batch_size, replace=False)
+#        X_batch = X[batch_idx]
+#        Y_batch = Y[batch_idx]
+        X_batch = X
+        Y_batch = Y
 
         loss, couple, grad = mapping_learning_gradient(M,W,X_batch,Y_batch,reg)
         loss_history.append(loss)
@@ -160,10 +162,10 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
     bias_2 = bias_variable([l])
     layer_2 = tf.nn.relu(tf.matmul(layer_1, W_2) + bias_2)
 
-    layer_2 = tf.add(layer_2, 1e-15)
+#    layer_2 = tf.add(layer_2, 1e-15)
 
-#    layer = tf.nn.softmax(layer_2)
-    layer = layer_2 / tf.reshape(tf.reduce_sum(layer_2, 1), [-1, 1])
+    layer = tf.nn.softmax(layer_2)
+#    layer = layer_2 / tf.reshape(tf.reduce_sum(layer_2, 1), [-1, 1])
 
     loss_label = tf.norm(compute_distance_matrix(layer, l) - M)
     loss_data = tf.norm(compute_distance_matrix(tf.transpose(layer), num) - dc)
@@ -171,7 +173,7 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000):
     loss = loss_label * loss_label + lam_2 * loss_data * loss_data
 
     with tf.Session() as sess:
-        train_step = tf.train.AdamOptimizer(1e-4).minimize(loss)
+        train_step = tf.train.AdamOptimizer(1e-2).minimize(loss)
         sess.run(tf.initialize_all_variables())
 
         for i in range(compress_number):
@@ -193,7 +195,7 @@ def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkh
     :param lam: the regularization hyper parameter about phi(y)
     :return:
     """
-    W = np.random.rand(l, X.shape[1])
+    W = np.ones((l, X.shape[1]))*0.5
     for iter in range(N):
         print("the %d th iteration" % (iter))
         Y_ = compression_train(Y, M, DC, l, lam_2, compress_number)
@@ -204,12 +206,14 @@ def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkh
             M = np.abs(K_diag - 2 * K + K_diag.T)
             M = M/np.max(M)
         loss_history, coupling, W = mapping_train(X, Y_, M, W, learning_rate, sinkhorn_number, batch_size, reg)
-        print("the iter last loss: %f",loss_history[-1])
+#        print("the iter last loss: %f",loss_history[-1])
         M = ground_train(coupling, Y_, C, lam_1, M)
+        pre_Y = predict(X, W, X, Y, 80)
+        print("the %d th iteraton error: %f" %(iter, np.linalg.norm(pre_Y-Y)))
     return Y_, M, W
 
 #TODO using bicluster
-def predict(X_test, W, X, Y, Y_, knn_number=10):
+def predict(X_test, W, X, Y, knn_number=10):
     """
     calculate the h(X), then bi-cluster it. justify which cluster is closet to X_test, then choose knn from this cluster
     to average as the final label
@@ -219,26 +223,29 @@ def predict(X_test, W, X, Y, Y_, knn_number=10):
     :param Y: the train label:m*L
     :return: Y_test
     """
-#    temp_HX = np.exp(np.dot(W, X.T))
-#    temp_HX_sum = np.sum(temp_HX, axis=0).reshape(1, -1)
-#    H_X = temp_HX/temp_HX_sum  #dimension: L*m
-#    H_X = H_X.T #dimension: m*L
+    temp_HX = np.exp(np.dot(W, X.T))
+    temp_HX_sum = np.sum(temp_HX, axis=0).reshape(1, -1)
+    H_X = temp_HX/temp_HX_sum  #dimension: L*m
+    H_X = H_X.T #dimension: m*L
 
     test_HX = np.exp(np.dot(W, X_test.T))
-    test_HX_sum = np.sum(test_HX, axis=0).reshape(1,-1)
+    test_HX_sum = np.sum(test_HX, axis=0).reshape(1, -1)
     pre_H_X = test_HX/test_HX_sum
     pre_H_X = pre_H_X.T #dimension: n*L
     pre_y = []
+    weight = list(range(2*(knn_number-1), -1, -2))
+    weight = [t/(knn_number*(knn_number-1)) for t in weight]
     for i in range(pre_H_X.shape[0]):
         temp = pre_H_X[i]
-        temp_re = (temp-Y_)**2
+        temp_re = (temp-H_X)**2
         candidate = np.sum(temp_re, axis=1)
         dis_index = np.argsort(candidate)
         pre_label = 0
         #add weight?
+
         for j in range(knn_number):
-            pre_label = pre_label + Y[dis_index[j]]
-        pre_label /= knn_number
+            pre_label = pre_label + weight[j]*Y[dis_index[j]]
+#        pre_label /= knn_number
         pre_y.append(pre_label)
     pre_y = np.array(pre_y)
     return pre_y
@@ -292,27 +299,28 @@ def read_split_file(file_name, N):
 
 if __name__ == '__main__':
 
-    C_set = [1e-2, 1e-1, 1, 10, 1e2]
-    lam_1_set = [1e-2, 1e-1, 1, 10, 1e2]
-    lam_2_set = [1e-2, 1e-1, 1, 10, 1e2]
-    rate_set = [5e-9, 5e-8]
+    C_set = [0.05, 0.1, 0.5]
+    lam_1_set = [50, 100, 150, 200]
+    lam_2_set = [50, 100, 150, 200]
+    rate_set = [5e-9, 1e-9, 5e-8, 1e-8, 1e-7, 1e-6, 1e-5]
     knn_set = [5, 10, 20, 50, 70, 80]
-
+    N_set = [3, 5, 10, 20, 50, 100]
+    l_set = [5, 10, 20, 30, 50, 70, 90]
     N = 3
     C = 0.1
     lam_1 = 100  #In ground learning, the hyper parameter of phi(y)
     lam_2 = 100   #In compression, balance the loss_label and loss_data
-    l = 70
+    l = 50
     reg = 0.05
-    knn_number = 50
+    knn_number = 80
     compress_number = 10000
     sinkhorn_number = 1
     num_training = 1000
     num_testing = 500
-    batch_size = int(num_training/2)
-    learning_rate = 1e-8
+    batch_size = int(num_training)
+    learning_rate = 1e-9
 
-    M = np.random.rand(l, l)
+    M = np.ones((l, l)) - np.eye(l)
     M = M / np.max(M)
 
     feature_matrix, label_matrix, L, number, dimension = read_data()
@@ -342,23 +350,29 @@ if __name__ == '__main__':
     # DC represent the data correlation
     DC = compute_squared(train_Y.T)
 
+    seq = 0
     file = open('result.txt', 'w')
-#    for knn_number in knn_set:
+    M = np.ones((l, l)) - np.eye(l)
+    M = M / np.max(M)
     Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg)
     print("begin predict")
-    pre_Y = predict(test_X, W, train_X, train_Y, Y_, knn_number)
-#        print("knn_number = %f, error = %f" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
-#        file.write("knn_number = %f, error = %f\n" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
+    pre_Y = predict(test_X, W, train_X, origin_train_Y, knn_number)
+    print("knn_number = %f, error = %f" % (l, np.linalg.norm(pre_Y-test_Y)))
+    file.write("knn_number = %f, error = %f\n" % (l, np.linalg.norm(pre_Y-test_Y)))
 
     # save the mat file to matlab
-    train_Y = sparse.csc_matrix(origin_train_Y.T)
-    test_Y = sparse.csc_matrix(origin_test_Y.T)
-    pre_Y = sparse.csc_matrix(pre_Y.T)
+    train_Y_temp = sparse.csc_matrix(origin_train_Y.T)
+    test_Y_temp = sparse.csc_matrix(origin_test_Y.T)
+    pre_Y_temp = sparse.csc_matrix(pre_Y.T)
 
-    scipy.io.savemat('train_Y.mat', {'train_Y': train_Y})
-    scipy.io.savemat('pre_Y.mat', {'pre_Y': pre_Y})
-    scipy.io.savemat('test_Y.mat', {'test_Y': test_Y})
+    train_name = 'train_Y'+str(seq)+'.mat'
+    pre_name = 'pre_Y'+str(seq)+'.mat'
+    test_name = 'test_Y'+str(seq)+'.mat'
 
+    scipy.io.savemat(train_name, {'train_Y': train_Y_temp})
+    scipy.io.savemat(pre_name, {'pre_Y': pre_Y_temp})
+    scipy.io.savemat(test_name, {'test_Y': test_Y_temp})
+    seq += 1
 
 
 
