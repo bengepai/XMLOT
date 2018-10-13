@@ -308,7 +308,7 @@ if __name__ == '__main__':
     lam_1_set = [50, 100, 150, 200]
     lam_2_set = [50, 100, 150, 200]
     rate_set = [5e-9, 1e-9, 5e-8, 1e-8, 1e-7, 1e-6, 1e-5]
-    knn_set = [5, 10, 20, 50, 70, 80]
+    knn_set = [2, 3, 4, 5, 6, 7, 8, 9]
     N_set = [3, 5, 10, 20, 50, 100]
     l_set = [5, 10, 20, 30, 50, 70, 90]
     seed_set = [11, 12, 13, 14, 15]
@@ -319,7 +319,7 @@ if __name__ == '__main__':
     lam_2 = 100   #In compression, balance the loss_label and loss_data
     l = 50
     reg = 0.05
-    knn_number = 80
+    knn_number = 3
     compress_number = 10000
     sinkhorn_number = 1
     num_training = 1000
@@ -359,26 +359,26 @@ if __name__ == '__main__':
 
     seq = 0
     file = open('result.txt', 'w')
-    for knn_number in knn_set:
-        Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg, seed)
-        print("begin predict")
-        pre_Y = predict(test_X, W, train_X, origin_train_Y, knn_number)
-        print("knn_number = %f, error = %f" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
-        file.write("knn_number = %f, error = %f\n" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
+#    for knn_number in knn_set:
+    Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg, seed)
+    print("begin predict")
+    pre_Y = predict(test_X, W, train_X, origin_train_Y, knn_number)
+    print("knn_number = %d, error = %f" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
+    file.write("knn_number = %d, error = %f\n" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
 
-        # save the mat file to matlab
-        train_Y_temp = sparse.csc_matrix(origin_train_Y.T)
-        test_Y_temp = sparse.csc_matrix(origin_test_Y.T)
-        pre_Y_temp = sparse.csc_matrix(pre_Y.T)
+    # save the mat file to matlab
+    train_Y_temp = sparse.csc_matrix(origin_train_Y.T)
+    test_Y_temp = sparse.csc_matrix(origin_test_Y.T)
+    pre_Y_temp = sparse.csc_matrix(pre_Y.T)
 
-        train_name = 'train_Y'+str(seq)+'.mat'
-        pre_name = 'pre_Y'+str(seq)+'.mat'
-        test_name = 'test_Y'+str(seq)+'.mat'
+    train_name = 'train_Y'+str(seq)+'.mat'
+    pre_name = 'pre_Y'+str(seq)+'.mat'
+    test_name = 'test_Y'+str(seq)+'.mat'
 
-        scipy.io.savemat(train_name, {'train_Y': train_Y_temp})
-        scipy.io.savemat(pre_name, {'pre_Y': pre_Y_temp})
-        scipy.io.savemat(test_name, {'test_Y': test_Y_temp})
-        seq += 1
+    scipy.io.savemat(train_name, {'train_Y': train_Y_temp})
+    scipy.io.savemat(pre_name, {'pre_Y': pre_Y_temp})
+    scipy.io.savemat(test_name, {'test_Y': test_Y_temp})
+    seq += 1
 
 
 
@@ -393,30 +393,30 @@ if __name__ == '__main__':
 """
 # the current result
 precision at 1--5
-    0.7480
-    0.6380
-    0.5693
-    0.4850
-    0.4300
+    0.9620
+    0.9320
+    0.8867
+    0.8225
+    0.7576
 
 nDCG at 1--5
-    0.7480
-    0.6677
-    0.6342
-    0.5995
-    0.5896
+    0.9620
+    0.9620
+    0.9620
+    0.9620
+    0.9620
 
 propensity weighted precision at 1--5
-    0.3918
-    0.4006
-    0.4096
-    0.4026
-    0.4072
+    0.5906
+    0.6961
+    0.7916
+    0.8663
+    0.9218
 
 propensity weighted nDCG at 1--5
-    0.3918
-    0.3984
-    0.4046
-    0.4008
-    0.4035
+    0.5906
+    0.6690
+    0.7356
+    0.7858
+    0.8220
 """
