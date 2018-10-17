@@ -1,9 +1,13 @@
 import numpy as np
 import ot
+import os
+import time
 import tensorflow as tf
 import scipy.io
 from scipy import sparse
 import matplotlib.pyplot as plt
+
+#os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 
 def h(X,W):
     """
@@ -83,7 +87,7 @@ def mapping_train(X, Y, M, W, learning_rate = 1e-6, num_iters = 50,batch_size = 
         X_batch = X
         Y_batch = Y
 
-        loss, couple, grad = mapping_learning_gradient(M,W,X_batch,Y_batch,reg)
+        loss, couple, grad = mapping_learning_gradient(M, W, X_batch, Y_batch, reg)
         loss_history.append(loss)
         coupling = couple     #get the newest couple
         W -= learning_rate * grad
@@ -110,8 +114,7 @@ def ground_train(P, Y, C, lam_1, pre_M):
 
     # the gradient of dm(phi(Y)) - M
     L_num = pre_M.shape[0]
-    grad_f_phi_temp = np.ones((L_num, L_num))*(-2) + 2*L*np.eye(L_num)
-    grad_f_phi = (pre_M - compute_squared(Y)) * grad_f_phi_temp
+    grad_f_phi = 4*(compute_squared(Y) - pre_M)
 
     K_temp = K_0 - (1/C)*grad_f_k - (1/lam_1)*grad_f_phi
 
@@ -125,7 +128,7 @@ def ground_train(P, Y, C, lam_1, pre_M):
     return M
 
 # the network structure is so bad
-def compression_train(Y, M, DC, l, lam_2, compress_number = 2000, seed = 1):
+def compression_train(W, X, Y, M, DC, l, lam_2, reg, compress_number = 2000, seed = 1):
     """
     learn the mapping from high dimension to low dimension, Y:m*L -> Y':m*l
     :param Y:the label matrix
@@ -151,9 +154,40 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000, seed = 1):
         initial = tf.constant(0.1, shape=shape)
         return tf.Variable(initial)
 
+    def l1_norm(a):
+        norm_a = tf.reduce_sum(a, keepdims=True)
+        normalize_a = a/(norm_a)
+        return normalize_a
+
+    def get_sinkhorn_distance(M, r, c, lambda_sh, depth):
+        n = tf.shape(M)[0]
+        num = tf.shape(c)[0]
+        r = l1_norm(r)
+        c = l1_norm(c)
+        r = tf.transpose(r)
+        c = tf.transpose(c)
+
+        K = tf.exp(-lambda_sh*M)
+        K_T = tf.transpose(K)
+        v = tf.ones([n, num], tf.float32)/tf.cast(n, dtype=tf.float32)
+
+        for iii in range(depth):
+            u = r/(tf.matmul(K, v))
+            v = c/(tf.matmul(K_T, u))
+
+        return tf.reduce_sum(tf.multiply(u, tf.matmul(tf.multiply(K, M), v)))
+
+    #get the h_x
+    temp_HX = np.exp(np.dot(W, X.T))
+    temp_HX_sum = np.sum(temp_HX, axis=0).reshape(1, -1)
+    H_X = temp_HX / temp_HX_sum  # dimension: L*m
+    H_X = H_X.T  # dimension: m*L
+
     L = Y.shape[1]
     num = Y.shape[0]
     x = tf.placeholder("float", [None, L])
+    h_x = tf.placeholder("float", [num, l])
+    cost_matrix = tf.placeholder("float", [l, l])
     dc = tf.placeholder("float", [num, num])
 
     W_1 = weight_variable([L, int((L+l)/2)], 0.003)
@@ -164,29 +198,31 @@ def compression_train(Y, M, DC, l, lam_2, compress_number = 2000, seed = 1):
     bias_2 = bias_variable([l])
     layer_2 = tf.matmul(layer_1, W_2) + bias_2
 
-#    layer_2 = tf.add(layer_2, 1e-15)
-
     layer = tf.nn.softmax(layer_2)
+#    layer_2 = tf.add(layer_2, 1e-15)
 #    layer = layer_2 / tf.reshape(tf.reduce_sum(layer_2, 1), [-1, 1])
 
     loss_label = tf.norm(compute_distance_matrix(layer, l) - M)
     loss_data = tf.norm(compute_distance_matrix(tf.transpose(layer), num) - dc)
 
-    loss = loss_label * loss_label + lam_2 * loss_data * loss_data
-    tf.add_to_collection("losses", loss)
-#    losses = tf.add_n(tf.get_collection('losses'))
+    loss_reg = loss_label * loss_label + lam_2 * loss_data * loss_data
+
+    loss = tf.add(loss_reg, get_sinkhorn_distance(cost_matrix, layer, h_x, 1/reg, 100))
 
     train_step = tf.train.AdamOptimizer(1e-3).minimize(loss)
+#    tf.add_to_collection("losses", loss)
+#    losses = tf.add_n(tf.get_collection('losses'))
+
 
     with tf.Session() as sess:
-        tf.global_variables_initializer().run()
 
+        tf.global_variables_initializer().run()
         for i in range(compress_number):
-            sess.run(train_step, feed_dict={x: Y, dc: DC})
+            sess.run(train_step, feed_dict={x: Y, dc: DC, h_x: H_X, cost_matrix: M})
             if i % 500 == 0:
-                loss_value = sess.run(loss, feed_dict={x: Y, dc: DC})
+                loss_value = sess.run(loss, feed_dict={x: Y, dc: DC, h_x: H_X, cost_matrix: M})
                 print("step %d, loss %.10f" % (i, loss_value))
-        layer_r = sess.run(layer, feed_dict={x: Y, dc: DC})
+        layer_r = sess.run(layer, feed_dict={x: Y, dc: DC, h_x: H_X, cost_matrix: M})
     return layer_r
 
 def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg,seed):
@@ -203,7 +239,7 @@ def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkh
     W = np.ones((l, X.shape[1]))*0.5
     for iter in range(N):
         print("the %d th iteration" % (iter))
-        Y_ = compression_train(Y, M, DC, l, lam_2, compress_number,seed)
+        Y_ = compression_train(W, X, Y, M, DC, l, lam_2, reg, compress_number, seed)
         if iter == 0:
             K = np.dot(Y_.T, Y_)
             K_diag = np.diag(K)
@@ -213,12 +249,19 @@ def alternative_train(X, N, Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkh
         loss_history, coupling, W = mapping_train(X, Y_, M, W, learning_rate, sinkhorn_number, batch_size, reg)
 #        print("the iter last loss: %f",loss_history[-1])
         M = ground_train(coupling, Y_, C, lam_1, M)
-        pre_Y = predict(X, W, X, Y, 80)
-        print("the %d th iteraton error: %f" %(iter, np.linalg.norm(pre_Y-Y)))
+        #for test
+        temp_HX = np.exp(np.dot(W, X.T))
+        temp_HX_sum = np.sum(temp_HX, axis=0).reshape(1, -1)
+        H_X = temp_HX / temp_HX_sum  # dimension: L*m
+        H_X = H_X.T
+        print("the difference between H_X and Y_ is %f" % (np.linalg.norm(H_X-Y_)))
+
+#        pre_Y = predict(X, W, Y, Y_, M, reg, 25)
+#        print("the %d th iteraton error: %f" %(iter, np.linalg.norm(pre_Y-Y)))
     return Y_, M, W
 
 #TODO using bicluster
-def predict(X_test, W, X, Y, knn_number=10):
+def predict(X_test, W, Y, X, M, reg, knn_number=10):
     """
     calculate the h(X), then bi-cluster it. justify which cluster is closet to X_test, then choose knn from this cluster
     to average as the final label
@@ -241,16 +284,12 @@ def predict(X_test, W, X, Y, knn_number=10):
     weight = list(range(2*(knn_number-1), -1, -2))
     weight = [t/(knn_number*(knn_number-1)) for t in weight]
     for i in range(pre_H_X.shape[0]):
-        temp = pre_H_X[i]
-        temp_re = (temp-H_X)**2
-        candidate = np.sum(temp_re, axis=1)
-        dis_index = np.argsort(candidate)
         pre_label = 0
-        #add weight?
-
+        pre_temp = pre_H_X[i]
+        ot_loss, couple, u, v = ot.sinkhorn(pre_temp, H_X.T, M, reg)
+        dis_index = np.argsort(ot_loss)
         for j in range(knn_number):
             pre_label = pre_label + weight[j]*Y[dis_index[j]]
-#        pre_label /= knn_number
         pre_y.append(pre_label)
     pre_y = np.array(pre_y)
     return pre_y
@@ -304,41 +343,34 @@ def read_split_file(file_name, N):
 
 if __name__ == '__main__':
 
-    C_set = [0.05, 0.1, 0.5]
+    C_set = [0.05, 0.1, 0.5, 1]
     lam_1_set = [50, 100, 150, 200]
     lam_2_set = [50, 100, 150, 200]
     rate_set = [5e-9, 1e-9, 5e-8, 1e-8, 1e-7, 1e-6, 1e-5]
-    knn_set = [2, 3, 4, 5, 6, 7, 8, 9]
+    knn_set = [2, 6, 10, 30, 50, 100, 200]
     N_set = [3, 5, 10, 20, 50, 100]
-    l_set = [5, 10, 20, 30, 50, 70, 90]
-    seed_set = [11, 12, 13, 14, 15]
+    l_set = [15, 20, 25, 35]
     seed = 1
     N = 3
-    C = 0.1
-    lam_1 = 100  #In ground learning, the hyper parameter of phi(y)
-    lam_2 = 100   #In compression, balance the loss_label and loss_data
-    l = 50
+    C = 0.5
+    lam_1 = 150  #In ground learning, the hyper parameter of phi(y)
+    lam_2 = 50   #In compression, balance the loss_label and loss_data
+    l = 25
     reg = 0.05
-    knn_number = 3
+    knn_number = 10
     compress_number = 10000
     sinkhorn_number = 1
-    num_training = 1000
-    num_testing = 500
-    batch_size = int(num_training)
+    num_training = 2000
+    num_testing = 1000
     learning_rate = 1e-9
 
-    M = np.ones((l, l)) - np.eye(l)
-    M = M / np.max(M)
 
     feature_matrix, label_matrix, L, number, dimension = read_data()
 
-    mask = read_split_file("mediamill_trSplit.txt", 0)
+    mask = read_split_file("bibtex_trSplit.txt", 0)
+    batch_size = int(len(mask))
     mask = mask[0:num_training]
     train_X = feature_matrix[mask]
-
-#    num_testing = 500
-    mask_test = read_split_file("mediamill_tstSplit.txt", 0)
-    mask_test = mask[0:num_testing]
     train_Y = label_matrix[mask]
 # train_Y has term all zero
     train_Y_sum = np.sum(train_Y, axis=1).reshape(-1, 1)
@@ -346,6 +378,8 @@ if __name__ == '__main__':
     origin_train_Y = train_Y
     train_Y = train_Y / train_Y_sum
 
+    mask_test = read_split_file("bibtex_tstSplit.txt", 0)
+    mask_test = mask_test[0:num_testing]
     test_X = feature_matrix[mask_test]
     test_Y = label_matrix[mask_test]
 
@@ -359,27 +393,31 @@ if __name__ == '__main__':
 
     seq = 0
     file = open('result.txt', 'w')
-#    for knn_number in knn_set:
-    Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg, seed)
-    print("begin predict")
-    pre_Y = predict(test_X, W, train_X, origin_train_Y, knn_number)
-    print("knn_number = %d, error = %f" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
-    file.write("knn_number = %d, error = %f\n" % (knn_number, np.linalg.norm(pre_Y-test_Y)))
+    for l in l_set:
+        M = np.ones((l, l)) - np.eye(l)
+        M = M / np.max(M)
+        start = time.clock()
+        Y_, M, W = alternative_train(train_X, N, train_Y, M, DC, l, C, lam_1, lam_2, compress_number, sinkhorn_number, batch_size, learning_rate, reg, seed)
+        print("begin predict")
+        pre_Y = predict(test_X, W, origin_train_Y, train_X, M, reg, knn_number)
+        print("l = %d, error = %f" % (l, np.linalg.norm(pre_Y-test_Y)))
+        file.write("l = %d, error = %f\n" % (l, np.linalg.norm(pre_Y-test_Y)))
 
-    # save the mat file to matlab
-    train_Y_temp = sparse.csc_matrix(origin_train_Y.T)
-    test_Y_temp = sparse.csc_matrix(origin_test_Y.T)
-    pre_Y_temp = sparse.csc_matrix(pre_Y.T)
+        # save the mat file to matlab
+        train_Y_temp = sparse.csc_matrix(origin_train_Y.T)
+        test_Y_temp = sparse.csc_matrix(origin_test_Y.T)
+        pre_Y_temp = sparse.csc_matrix(pre_Y.T)
 
-    train_name = 'train_Y'+str(seq)+'.mat'
-    pre_name = 'pre_Y'+str(seq)+'.mat'
-    test_name = 'test_Y'+str(seq)+'.mat'
+        train_name = 'train_Y'+str(seq)+'.mat'
+        pre_name = 'pre_Y'+str(seq)+'.mat'
+        test_name = 'test_Y'+str(seq)+'.mat'
 
-    scipy.io.savemat(train_name, {'train_Y': train_Y_temp})
-    scipy.io.savemat(pre_name, {'pre_Y': pre_Y_temp})
-    scipy.io.savemat(test_name, {'test_Y': test_Y_temp})
-    seq += 1
-
+        scipy.io.savemat(train_name, {'train_Y': train_Y_temp})
+        scipy.io.savemat(pre_name, {'pre_Y': pre_Y_temp})
+        scipy.io.savemat(test_name, {'test_Y': test_Y_temp})
+        seq += 1
+        end = time.clock()
+        print("run time %d s" % (end-start))
 
 
 """
